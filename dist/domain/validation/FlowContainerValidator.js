@@ -4,6 +4,7 @@ exports.getFlowStructureErrors = void 0;
 const tslib_1 = require("tslib");
 const ajv_1 = tslib_1.__importDefault(require("ajv"));
 const ajv_formats_1 = tslib_1.__importDefault(require("ajv-formats"));
+const expression_parser_1 = require("@floip/expression-parser");
 function folderPathFromSpecificationVersion(version) {
     if (version == '1.0.0-rc1') {
         return '../../../dist/resources/validationSchema/1.0.0-rc1/';
@@ -12,6 +13,23 @@ function folderPathFromSpecificationVersion(version) {
         return '../../../dist/resources/validationSchema/1.0.0-rc2/';
     }
     return null;
+}
+function createAjvInstance(schema) {
+    const ajv = new ajv_1.default();
+    ajv_formats_1.default(ajv);
+    ajv.addFormat('floip-expression', {
+        type: 'string',
+        validate: (x) => {
+            try {
+                expression_parser_1.parse(x);
+            }
+            catch (e) {
+                return false;
+            }
+            return true;
+        },
+    });
+    return ajv.compile(schema);
 }
 function getFlowStructureErrors(container, shouldValidateBlocks = true) {
     let flowSpecJsonSchema;
@@ -33,9 +51,7 @@ function getFlowStructureErrors(container, shouldValidateBlocks = true) {
             },
         ];
     }
-    const ajv = new ajv_1.default();
-    ajv_formats_1.default(ajv);
-    const validate = ajv.compile(flowSpecJsonSchema);
+    const validate = createAjvInstance(flowSpecJsonSchema);
     if (!validate(container)) {
         return validate.errors;
     }
@@ -74,10 +90,8 @@ function checkIndividualBlock(block, container, blockIndex, flowIndex) {
     var _a;
     const schemaFileName = blockTypeToInterfaceName(block.type);
     if (schemaFileName != null) {
-        const ajv = new ajv_1.default();
-        ajv_formats_1.default(ajv);
         const jsonSchema = require(folderPathFromSpecificationVersion(container.specification_version) + schemaFileName + '.json');
-        const validate = ajv.compile(jsonSchema);
+        const validate = createAjvInstance(jsonSchema);
         if (!validate(block)) {
             return (_a = validate.errors) === null || _a === void 0 ? void 0 : _a.map(error => {
                 error.dataPath = '/container/flows/' + flowIndex + '/blocks/' + blockIndex + error.dataPath;
