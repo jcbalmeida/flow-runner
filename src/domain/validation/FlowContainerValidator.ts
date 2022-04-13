@@ -1,6 +1,7 @@
 import {IContainer} from '../..'
 import Ajv, {ErrorObject} from 'ajv'
 import ajvFormat from 'ajv-formats'
+import {parse as floipExpressionParser} from '@floip/expression-parser'
 import {IMessageBlock} from '../../model/block/IMessageBlock'
 import {ISelectOneResponseBlock} from '../../model/block/ISelectOneResponseBlock'
 import {ISelectManyResponseBlock} from '../../model/block/ISelectManyResponseBlock'
@@ -17,6 +18,30 @@ function folderPathFromSpecificationVersion(version: string): string | null {
   return null
 }
 
+function createAjvInstance(schema: any) {
+  const ajv = new Ajv()
+
+  /*
+   * We need this to use AJV format such as 'date-time'
+   * https://json-schema.org/draft/2019-09/json-schema-validation.html#rfc.section.7)
+   */
+  ajvFormat(ajv)
+
+  ajv.addFormat('floip-expression', {
+    type: 'string',
+    validate: (x: string) => {
+      try {
+        floipExpressionParser(x)
+      } catch (e) {
+        return false
+      }
+      return true
+    },
+  })
+
+  return ajv.compile(schema)
+}
+
 /**
  * Validate a Flow Spec container and return a set of errors (if they exist).
  * This checks that the structure of the container is valid according to the flow spec.
@@ -26,16 +51,17 @@ function folderPathFromSpecificationVersion(version: string): string | null {
  * @returns null if there are no errors, or a set of validation errors
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getFlowStructureErrors(container: IContainer, shouldValidateBlocks = true): ErrorObject<string, Record<string, any>, unknown>[] | null | undefined {
+export function getFlowStructureErrors(
+  container: IContainer,
+  shouldValidateBlocks = true
+): ErrorObject<string, Record<string, any>, unknown>[] | null | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let flowSpecJsonSchema: any
   if (container.specification_version == '1.0.0-rc1') {
-    flowSpecJsonSchema = require('../../../dist/resources/validationSchema/1.0.0-rc1/flowSpecJsonSchema.json');
-  }
-  else if (container.specification_version == '1.0.0-rc2') {
-    flowSpecJsonSchema = require('../../../dist/resources/validationSchema/1.0.0-rc2/flowSpecJsonSchema.json');
-  }
-  else {
+    flowSpecJsonSchema = require('../../../dist/resources/validationSchema/1.0.0-rc1/flowSpecJsonSchema.json')
+  } else if (container.specification_version == '1.0.0-rc2') {
+    flowSpecJsonSchema = require('../../../dist/resources/validationSchema/1.0.0-rc2/flowSpecJsonSchema.json')
+  } else {
     return [
       {
         keyword: 'version',
@@ -48,10 +74,7 @@ export function getFlowStructureErrors(container: IContainer, shouldValidateBloc
     ]
   }
 
-  const ajv = new Ajv()
-  // we need this to use AJV format such as 'date-time' (https://json-schema.org/draft/2019-09/json-schema-validation.html#rfc.section.7)
-  ajvFormat(ajv)
-  const validate = ajv.compile(flowSpecJsonSchema)
+  const validate = createAjvInstance(flowSpecJsonSchema)
   if (!validate(container)) {
     return validate.errors
   }
@@ -93,14 +116,17 @@ function checkIndividualBlocks(container: IContainer): ErrorObject<string, Recor
   return errors
 }
 
-function checkIndividualBlock(block: IBlock, container: IContainer, blockIndex: number, flowIndex: number): ErrorObject<string, Record<string, any>, unknown>[] | null | undefined {
+function checkIndividualBlock(
+  block: IBlock,
+  container: IContainer,
+  blockIndex: number,
+  flowIndex: number
+): ErrorObject<string, Record<string, any>, unknown>[] | null | undefined {
   const schemaFileName = blockTypeToInterfaceName(block.type)
   if (schemaFileName != null) {
-    const ajv = new Ajv()
-    ajvFormat(ajv)
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const jsonSchema = require(folderPathFromSpecificationVersion(container.specification_version) + schemaFileName + '.json')
-    const validate = ajv.compile(jsonSchema)
+    const validate = createAjvInstance(jsonSchema)
     if (!validate(block)) {
       return validate.errors?.map(error => {
         error.dataPath = '/container/flows/' + flowIndex + '/blocks/' + blockIndex + error.dataPath
